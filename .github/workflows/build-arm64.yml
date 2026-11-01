@@ -1,5 +1,4 @@
-Fname: Gerar bibliotecas Android ARM64
-
+name: Gerar bibliotecas Android ARM64
 on:
   workflow_dispatch:
   push:
