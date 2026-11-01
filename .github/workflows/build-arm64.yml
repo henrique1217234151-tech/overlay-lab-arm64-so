@@ -1,0 +1,62 @@
+name: Gerar bibliotecas Android ARM64
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Baixar codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar SDK Android
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar NDK Android r27c
+        run: sdkmanager --install 'ndk;27.2.12479018'
+
+      - name: Baixar Dear ImGui v1.91.9
+        run: bash scripts/setup-deps.sh
+
+      - name: Configurar CMake para arm64-v8a
+        shell: bash
+        run: |
+          cmake -S app/src/main/cpp -B build-arm64 -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_SDK_ROOT/ndk/27.2.12479018/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-26 \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Compilar bibliotecas compartilhadas
+        run: cmake --build build-arm64 --parallel 4
+
+      - name: Validar bibliotecas ARM64
+        shell: bash
+        run: |
+          mkdir -p saida
+          cp build-arm64/liboverlay_host.so build-arm64/liboverlay_plugin.so saida/
+          python3 - <<'PY'
+          from pathlib import Path
+          for filename in ('liboverlay_host.so', 'liboverlay_plugin.so'):
+              data = (Path('saida') / filename).read_bytes()
+              assert data[:4] == b'\x7fELF', f'{filename}: nao e ELF'
+              assert data[4] == 2 and data[5] == 1, f'{filename}: nao e ELF 64-bit little-endian'
+              assert int.from_bytes(data[18:20], 'little') == 183, f'{filename}: nao e ARM64'
+              assert int.from_bytes(data[16:18], 'little') == 3, f'{filename}: nao e biblioteca compartilhada ELF'
+              print(f'{filename}: ARM64 ELF validado, {len(data)} bytes')
+          PY
+
+      - name: Disponibilizar arquivos .so
+        uses: actions/upload-artifact@v4
+        with:
+          name: overlay-lab-arm64-so
+          path: |
+            saida/liboverlay_host.so
+            saida/liboverlay_plugin.so
+          if-no-files-found: error
+          retention-days: 14
